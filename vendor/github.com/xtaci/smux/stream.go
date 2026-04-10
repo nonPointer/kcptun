@@ -72,9 +72,10 @@ type stream struct {
 	incr       uint32 // bytes sent since last window update
 
 	// UPD command
-	peerConsumed uint32        // num of bytes the peer has consumed
-	peerWindow   uint32        // peer window, initialized to 256KB, updated by peer
-	chUpdate     chan struct{} // notify of remote data consuming and window update
+	peerConsumed          uint32        // num of bytes the peer has consumed
+	peerWindow            uint32        // peer window, initialized to 256KB, updated by peer
+	chUpdate              chan struct{} // notify of remote data consuming and window update
+	windowUpdateThreshold uint32        // cached threshold for window update (MaxStreamBuffer/2)
 }
 
 type bufferRing struct {
@@ -83,15 +84,22 @@ type bufferRing struct {
 	head  int
 	tail  int
 	size  int
+	mask  int // bitmask for fast modulo when capacity is power of 2
 }
 
 func newBufferRing(capacity int) bufferRing {
 	if capacity < 1 {
 		capacity = 1
 	}
+	// ensure capacity is power of 2 for fast modulo using bitmask
+	cap := 1
+	for cap < capacity {
+		cap <<= 1
+	}
 	return bufferRing{
-		bufs:  make([][]byte, capacity),
-		heads: make([]*[]byte, capacity),
+		bufs:  make([][]byte, cap),
+		heads: make([]*[]byte, cap),
+		mask:  cap - 1,
 	}
 }
 
@@ -107,7 +115,7 @@ func (r *bufferRing) grow() {
 	newBufs := make([][]byte, newCap)
 	newHeads := make([]*[]byte, newCap)
 	for i := 0; i < r.size; i++ {
-		idx := (r.head + i) % len(r.bufs)
+		idx := (r.head + i) & r.mask
 		newBufs[i] = r.bufs[idx]
 		newHeads[i] = r.heads[idx]
 	}
@@ -115,6 +123,7 @@ func (r *bufferRing) grow() {
 	r.heads = newHeads
 	r.head = 0
 	r.tail = r.size
+	r.mask = newCap - 1
 }
 
 func (r *bufferRing) push(buf []byte, head *[]byte) {
@@ -123,7 +132,7 @@ func (r *bufferRing) push(buf []byte, head *[]byte) {
 	}
 	r.bufs[r.tail] = buf
 	r.heads[r.tail] = head
-	r.tail = (r.tail + 1) % len(r.bufs)
+	r.tail = (r.tail + 1) & r.mask
 	r.size++
 }
 
@@ -135,7 +144,7 @@ func (r *bufferRing) pop() (buf []byte, head *[]byte, ok bool) {
 	head = r.heads[r.head]
 	r.bufs[r.head] = nil
 	r.heads[r.head] = nil
-	r.head = (r.head + 1) % len(r.bufs)
+	r.head = (r.head + 1) & r.mask
 	r.size--
 	if r.size == 0 {
 		r.tail = r.head
@@ -157,7 +166,7 @@ func (r *bufferRing) consumeFront(b []byte) (n int, recycled *[]byte) {
 		recycled = r.heads[r.head]
 		r.bufs[r.head] = nil
 		r.heads[r.head] = nil
-		r.head = (r.head + 1) % len(r.bufs)
+		r.head = (r.head + 1) & r.mask
 		r.size--
 		if r.size == 0 {
 			r.tail = r.head
@@ -177,8 +186,9 @@ func newStream(id uint32, frameSize int, sess *Session) *stream {
 	s.sess = sess
 	s.die = make(chan struct{})
 	s.chFinEvent = make(chan struct{})
-	s.chWriteClosed = make(chan struct{}) // half-close support
-	s.peerWindow = initialPeerWindow      // set to initial window size
+	s.chWriteClosed = make(chan struct{})                             // half-close support
+	s.peerWindow = initialPeerWindow                                  // set to initial window size
+	s.windowUpdateThreshold = uint32(sess.config.MaxStreamBuffer / 2) // cache threshold
 	// pre-allocate ring buffer to reduce allocations during data transfer
 	s.bufferRing = newBufferRing(8)
 
@@ -192,18 +202,23 @@ func (s *stream) ID() uint32 {
 
 // Read reads data from the stream into the provided buffer.
 func (s *stream) Read(b []byte) (n int, err error) {
-	for {
-		switch s.sess.config.Version {
-		case 2:
+	if s.sess.config.Version == 2 {
+		for {
 			n, err = s.tryReadV2(b)
-		default:
-			n, err = s.tryReadV1(b)
+			if err != ErrWouldBlock {
+				return n, err
+			}
+			if ew := s.waitRead(); ew != nil {
+				return 0, ew
+			}
 		}
+	}
 
+	for {
+		n, err = s.tryReadV1(b)
 		if err != ErrWouldBlock {
 			return n, err
 		}
-
 		if ew := s.waitRead(); ew != nil {
 			return 0, ew
 		}
@@ -264,7 +279,7 @@ func (s *stream) tryReadV2(b []byte) (n int, err error) {
 
 	// send window update if the increased bytes exceed half of the buffer size
 	// or this is the initial read.
-	if s.incr >= uint32(s.sess.config.MaxStreamBuffer/2) || s.numRead == uint32(n) {
+	if s.incr >= s.windowUpdateThreshold || s.numRead == uint32(n) {
 		notifyConsumed = s.numRead
 		s.incr = 0 // reset incr counter
 	}
@@ -361,7 +376,7 @@ func (s *stream) writeToV2(w io.Writer) (n int64, err error) {
 		s.incr += bufLen
 
 		// send window update if the increased bytes exceed half of the buffer size
-		if s.incr >= uint32(s.sess.config.MaxStreamBuffer/2) || s.numRead == bufLen {
+		if s.incr >= s.windowUpdateThreshold || s.numRead == bufLen {
 			notifyConsumed = s.numRead
 			s.incr = 0
 		}
@@ -562,7 +577,7 @@ func (s *stream) writeV2(b []byte) (n int, err error) {
 		// eg1: uint32(0) - uint32(math.MaxUint32) = 1
 		// eg2: int32(uint32(0) - uint32(1)) = -1
 		//
-		// basicially, you can take it as a MODULAR ARITHMETIC
+		// basically, you can take it as a MODULAR ARITHMETIC
 		inflight := int32(atomic.LoadUint32(&s.numWritten) - atomic.LoadUint32(&s.peerConsumed))
 		if inflight < 0 { // security check for malformed data
 			return 0, ErrConsumed

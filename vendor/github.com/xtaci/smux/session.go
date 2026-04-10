@@ -419,7 +419,15 @@ func (s *Session) recvLoop() {
 		sid := hdr.StreamID()
 		switch hdr.Cmd() {
 		case cmdNOP:
+			if hdr.Length() != 0 {
+				s.notifyProtoError(ErrInvalidProtocol)
+				return
+			}
 		case cmdSYN: // stream opening
+			if hdr.Length() != 0 {
+				s.notifyProtoError(ErrInvalidProtocol)
+				return
+			}
 			var accepted *stream
 			s.streamLock.Lock()
 			if _, ok := s.streams[sid]; !ok {
@@ -437,6 +445,10 @@ func (s *Session) recvLoop() {
 			}
 
 		case cmdFIN: // stream closing
+			if hdr.Length() != 0 {
+				s.notifyProtoError(ErrInvalidProtocol)
+				return
+			}
 			s.streamLock.Lock()
 			st := s.streams[sid]
 			s.streamLock.Unlock()
@@ -475,6 +487,10 @@ func (s *Session) recvLoop() {
 
 		case cmdUPD: // a window update signal (v2 only)
 			if s.config.Version != 2 {
+				s.notifyProtoError(ErrInvalidProtocol)
+				return
+			}
+			if hdr.Length() != szCmdUPD {
 				s.notifyProtoError(ErrInvalidProtocol)
 				return
 			}
@@ -528,7 +544,7 @@ func (s *Session) keepalive() {
 
 // shaperLoop implements a priority queue and bandwidth shaping for write requests.
 // Eg: Control messages are prioritized over data messages, and shaper tries
-// it's best to keep fair bandwidth among streams.
+// its best to keep fair bandwidth among streams.
 func (s *Session) shaperLoop() {
 	chShaper := s.shaper
 
@@ -538,10 +554,16 @@ func (s *Session) shaperLoop() {
 			return
 		case r := <-chShaper:
 			s.sq.Push(r)
-			// notify sendLoop there are pending requests
-			if len(chShaper) == 0 || s.sq.Len() > minShaperNotifySize {
-				s.notifyShaperPending()
+			// batch drain: collect more requests if available
+			for len(chShaper) > 0 && s.sq.Len() < maxShaperSize {
+				select {
+				case r := <-chShaper:
+					s.sq.Push(r)
+				default:
+				}
 			}
+			// notify sendLoop there are pending requests
+			s.notifyShaperPending()
 
 			if s.sq.Len() >= maxShaperSize {
 				// stop accepting new requests temporarily if shaper queue is full
