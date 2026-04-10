@@ -39,8 +39,10 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
-          check-latest: true
+          # Always use the latest stable Go so that `go get -u` can pull
+          # dependencies that require a newer toolchain than go.mod declares.
+          # `go mod tidy` will bump go.mod's own `go` directive accordingly.
+          go-version: 'stable'
           cache: true
 
       - name: Install UPX
