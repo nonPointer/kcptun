@@ -1,0 +1,152 @@
+name: Weekly Deps Update & Release
+
+on:
+  schedule:
+    # Every Sunday 00:00 UTC (Monday 08:00 CST)
+    - cron: '0 0 * * 0'
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Semver bump level (only applied when dependencies change)'
+        required: false
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+concurrency:
+  group: weekly-release
+  cancel-in-progress: false
+
+jobs:
+  update-and-release:
+    name: Update deps and publish release
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+
+      - name: Install UPX
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends upx-ucl
+
+      - name: Update Go dependencies
+        id: update
+        run: |
+          set -euo pipefail
+          go get -u ./...
+          go mod tidy
+          go mod vendor
+          if [[ -n "$(git status --porcelain -- go.mod go.sum vendor)" ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Dependencies updated:"
+            git --no-pager diff --stat -- go.mod go.sum
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No dependency changes — release will be skipped."
+          fi
+
+      - name: Run tests
+        if: steps.update.outputs.changed == 'true'
+        run: go test -mod=vendor ./...
+
+      - name: Commit dependency updates
+        if: steps.update.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add go.mod go.sum vendor
+          git commit -m "chore(deps): weekly auto update $(date -u +%Y-%m-%d)"
+          git push origin HEAD:${{ github.ref_name }}
+
+      - name: Compute next semver tag
+        if: steps.update.outputs.changed == 'true'
+        id: tag
+        env:
+          BUMP: ${{ github.event.inputs.bump || 'patch' }}
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+
+          # Find the latest vMAJOR.MINOR.PATCH tag (semver-sorted).
+          PREV=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1 || true)
+
+          if [[ -z "$PREV" ]]; then
+            # No prior semver tag — start the series at v1.0.0.
+            NEXT="v1.0.0"
+          else
+            IFS='.' read -r MAJOR MINOR PATCH <<< "${PREV#v}"
+            # Strip any pre-release / build suffix from PATCH (e.g. 3-rc1 → 3).
+            PATCH="${PATCH%%[-+]*}"
+            case "$BUMP" in
+              major) NEXT="v$((MAJOR + 1)).0.0" ;;
+              minor) NEXT="v${MAJOR}.$((MINOR + 1)).0" ;;
+              patch) NEXT="v${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
+              *) echo "Unknown bump level: $BUMP" >&2; exit 1 ;;
+            esac
+          fi
+
+          # Safety net: if the computed tag already exists, keep bumping PATCH.
+          while git rev-parse --verify --quiet "refs/tags/${NEXT}" >/dev/null; do
+            IFS='.' read -r M m p <<< "${NEXT#v}"
+            NEXT="v${M}.${m}.$((p + 1))"
+          done
+
+          echo "prev=${PREV:-<none>}" >> "$GITHUB_OUTPUT"
+          echo "tag=${NEXT}"           >> "$GITHUB_OUTPUT"
+          echo "version=${NEXT#v}"     >> "$GITHUB_OUTPUT"
+          echo "Previous tag: ${PREV:-<none>}"
+          echo "Next tag:     ${NEXT}  (bump=${BUMP})"
+
+      - name: Build release artifacts
+        if: steps.update.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: bash build-release.sh
+
+      - name: Create and push tag
+        if: steps.update.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          git tag -a "${{ steps.tag.outputs.tag }}" \
+                  -m "Automated release ${{ steps.tag.outputs.tag }}"
+          git push origin "${{ steps.tag.outputs.tag }}"
+
+      - name: Publish GitHub Release
+        if: steps.update.outputs.changed == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: kcptun ${{ steps.tag.outputs.tag }}
+          body: |
+            Automated release triggered by weekly dependency update.
+
+            - Previous tag: `${{ steps.tag.outputs.prev }}`
+            - Built from commit: `${{ github.sha }}`
+            - Go version: see `go.mod`
+            - Artifact version string: `${{ steps.tag.outputs.version }}`
+            - SHA1 checksums: see `SHA1SUMS` below
+          files: |
+            build/*.tar.gz
+            build/SHA1SUMS
+          generate_release_notes: true
+          fail_on_unmatched_files: true

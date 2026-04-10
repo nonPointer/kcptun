@@ -35,8 +35,9 @@ SERVER_SRC="github.com/xtaci/kcptun/server"
 # Build output directory
 BUILD_DIR="$(pwd)/build"
 
-# Version based on UTC date and linker flags
-VERSION=$(date -u +%Y%m%d)
+# Version string embedded in the binary.
+# Honors an externally provided VERSION (e.g. from CI) and falls back to the UTC date.
+VERSION="${VERSION:-$(date -u +%Y%m%d)}"
 LDFLAGS="-X main.VERSION=${VERSION} -s -w"
 
 # --- Tool Check ---
