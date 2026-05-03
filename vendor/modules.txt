@@ -17,13 +17,13 @@ github.com/google/gopacket/layers
 # github.com/klauspost/cpuid/v2 v2.3.0
 ## explicit; go 1.22
 github.com/klauspost/cpuid/v2
-# github.com/klauspost/reedsolomon v1.13.3
+# github.com/klauspost/reedsolomon v1.14.0
 ## explicit; go 1.24
 github.com/klauspost/reedsolomon
 # github.com/mattn/go-colorable v0.1.14
 ## explicit; go 1.18
 github.com/mattn/go-colorable
-# github.com/mattn/go-isatty v0.0.21
+# github.com/mattn/go-isatty v0.0.22
 ## explicit; go 1.21
 github.com/mattn/go-isatty
 # github.com/pkg/errors v0.9.1
