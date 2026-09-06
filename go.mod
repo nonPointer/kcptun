@@ -9,7 +9,7 @@ require (
 	github.com/xtaci/qpp v1.1.25
 	github.com/xtaci/smux v1.5.57
 	github.com/xtaci/tcpraw v1.2.32
-	golang.org/x/crypto v0.55.0
+	golang.org/x/crypto v0.56.0
 )
 
 require (
@@ -30,4 +30,4 @@ require (
 // replace github.com/xtaci/smux => /home/xtaci/go/src/github.com/xtaci/smux
 //replace github.com/xtaci/kcp-go/v5 => /home/xtaci/go/src/github.com/xtaci/kcp-go
 
-go 1.25.0
+go 1.26.0
