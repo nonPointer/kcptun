@@ -5,9 +5,9 @@ require (
 	github.com/golang/snappy v1.0.0
 	github.com/pkg/errors v0.9.1
 	github.com/urfave/cli v1.22.17
-	github.com/xtaci/kcp-go/v5 v5.6.73
+	github.com/xtaci/kcp-go/v5 v5.7.2
 	github.com/xtaci/qpp v1.1.25
-	github.com/xtaci/smux v1.5.57
+	github.com/xtaci/smux v1.5.58
 	github.com/xtaci/tcpraw v1.2.32
 	golang.org/x/crypto v0.58.0
 )
@@ -22,7 +22,7 @@ require (
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/tjfoc/gmsm v1.4.1 // indirect
-	golang.org/x/net v0.61.0 // indirect
+	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/time v0.16.0 // indirect
 )
