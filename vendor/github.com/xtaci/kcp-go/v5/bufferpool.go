@@ -1,6 +1,6 @@
 // The MIT License (MIT)
 //
-// # Copyright (c) 2015 xtaci
+// Copyright (c) 2015 xtaci
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,7 +32,7 @@ var errBufferSizeMismatch = errors.New("buffer size mismatch")
 
 // A system-wide packet buffer shared among sending, receiving and FEC
 // to mitigate high-frequency memory allocation of packets.
-var defaultBufferPool = newBufferPool(mtuLimit)
+var defaultBufferPool = newBufferPool(maxPacketSize)
 
 type bufferPool struct {
 	xmitBuf sync.Pool
@@ -56,10 +56,24 @@ func (bp *bufferPool) Get() []byte {
 
 // Put returns a buffer to the pool.
 func (bp *bufferPool) Put(buf []byte) error {
-	// Only put back buffers whose capacity matches mtuLimit.
-	if cap(buf) != mtuLimit {
+	// Only put back buffers whose capacity matches maxPacketSize.
+	if cap(buf) != maxPacketSize {
 		return errBufferSizeMismatch
 	}
 	bp.xmitBuf.Put(buf[:cap(buf)]) // reset slice length to full capacity
 	return nil
+}
+
+// Puts returns some buffers to the pool.
+func (bp *bufferPool) Puts(buffers [][]byte) {
+	for _, buf := range buffers {
+		bp.Put(buf)
+	}
+}
+
+// Puts returns some buffers to the pool.
+func (bp *bufferPool) PutPkts(buffers []fecPacket) {
+	for _, buf := range buffers {
+		bp.Put(buf)
+	}
 }
