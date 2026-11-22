@@ -5,9 +5,9 @@ require (
 	github.com/golang/snappy v1.0.0
 	github.com/pkg/errors v0.9.1
 	github.com/urfave/cli v1.22.17
-	github.com/xtaci/kcp-go/v5 v5.7.5
+	github.com/xtaci/kcp-go/v5 v5.7.8
 	github.com/xtaci/qpp v1.1.25
-	github.com/xtaci/smux v1.5.60
+	github.com/xtaci/smux v1.5.61
 	github.com/xtaci/tcpraw v1.2.32
 	golang.org/x/crypto v0.59.0
 )
@@ -15,6 +15,7 @@ require (
 require (
 	github.com/coreos/go-iptables v0.8.0 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect
+	github.com/emmansun/gmsm v0.45.4 // indirect
 	github.com/google/gopacket v1.1.19 // indirect
 	github.com/juju/ratelimit v1.0.2 // indirect
 	github.com/klauspost/cpuid/v2 v2.4.2 // indirect
@@ -23,9 +24,9 @@ require (
 	github.com/mattn/go-colorable v0.1.16 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/pion/transport/v5 v5.1.5 // indirect
+	github.com/puzpuzpuz/xsync/v4 v4.5.0 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
-	github.com/tjfoc/gmsm v1.4.1 // indirect
-	golang.org/x/net v0.62.0 // indirect
+	golang.org/x/net v0.63.0 // indirect
 	golang.org/x/sys v0.50.0 // indirect
 )
 
